@@ -1,9 +1,10 @@
 /* -----------------------------------------------------------------------
-   unix64.S - Copyright (c) 2013  The Written Word, Inc.
+   kiom.S   - Copyright (c) 2013  Moriyoshi Koizumi
+            - Copyright (c) 2013  The Written Word, Inc.
 	    - Copyright (c) 2008  Red Hat, Inc
 	    - Copyright (c) 2002  Bo Thorsen <bo@suse.de>
 
-   x86-64 Foreign Function Interface 
+   K1OM (MIC) architecture Foreign Function Interface 
 
    Permission is hereby granted, free of charge, to any person obtaining
    a copy of this software and associated documentation files (the
@@ -26,15 +27,15 @@
    DEALINGS IN THE SOFTWARE.
    ----------------------------------------------------------------------- */
 
-#if defined(__x86_64__) && !defined(__MIC__)
+#if defined(__x86_64__) && defined(__MIC__)
 #define LIBFFI_ASM	
 #include <fficonfig.h>
 #include <ffi.h>
 
 .text
 
-/* ffi_call_unix64 (void *args, unsigned long bytes, unsigned flags,
-	            void *raddr, void (*fnaddr)(void));
+/* ffi_call_k1om (void *args, unsigned long bytes, unsigned flags,
+	          void *raddr, void (*fnaddr)(void));
 
    Bit o trickiness here -- ARGS+BYTES is the base of the stack frame
    for this function.  This has been allocated by ffi_call.  We also
@@ -44,7 +45,7 @@
 	.globl	ffi_call_unix64
 	.type	ffi_call_unix64,@function
 
-ffi_call_unix64:
+ffi_call_k1om:
 .LUW0:
 	movq	(%rsp), %r10		/* Load return address.  */
 	leaq	(%rdi, %rsi), %rax	/* Find local stack base.  */
@@ -56,7 +57,6 @@ ffi_call_unix64:
 .LUW1:
 	movq	%rdi, %r10		/* Save a copy of the register area. */
 	movq	%r8, %r11		/* Save a copy of the target fn.  */
-	movl	%r9d, %eax		/* Set number of SSE registers.  */
 
 	/* Load up all argument registers.  */
 	movq	(%r10), %rdi
@@ -65,9 +65,10 @@ ffi_call_unix64:
 	movq	24(%r10), %rcx
 	movq	32(%r10), %r8
 	movq	40(%r10), %r9
-	testl	%eax, %eax
-	jnz	.Lload_sse
-.Lret_from_load_sse:
+	testl	%r9d, %r9d
+	jnz	.Lload_vec
+.Lret_from_load_vec:
+	movl	%r9d, %eax		/* Set number of SSE registers.  */
 
 	/* Deallocate the reg arg area.  */
 	leaq	176(%r10), %rsp
@@ -146,11 +147,15 @@ ffi_call_unix64:
 
 	.align 2
 .Lst_float:
-	movss	%xmm0, (%rdi)
+	movl	$1, %eax
+	kmov	%eax, %k1
+	vpackstorelps	%zmm0, (%rdi){%k1}
 	ret
 	.align 2
 .Lst_double:
-	movsd	%xmm0, (%rdi)
+	movl	$1, %eax
+	kmov	%eax, %k1
+	vpackstorelpd	%zmm0, (%rdi){%k1}
 	ret
 .Lst_ldouble:
 	fstpt	(%rdi)
@@ -165,40 +170,59 @@ ffi_call_unix64:
 	   value to a 16 byte scratch area first.  Bits 8, 9, and 10
 	   control where the values are located.  Only one of the three
 	   bits will be set; see ffi_prep_cif_machdep for the pattern.  */
-	movd	%xmm0, %r10
-	movd	%xmm1, %r11
 	testl	$0x100, %ecx
-	cmovnz	%rax, %rdx
-	cmovnz	%r10, %rax
+	jz	.Lst_struct_p2
+	/* %zmm0, %rax */
+	mov	%rax, 8(%rsi)
+	movl	$1, %eax
+	kmov	%eax, %k1
+	vpackstorelpd	%zmm0, (%rsi){%k1}
+	jmp	.Lst_struct_e
+.Lst_struct_p2:
 	testl	$0x200, %ecx
-	cmovnz	%r10, %rdx
+	jz	.Lst_struct_p3
+	/* %rax, %zmm0 */
+	mov	%rax, (%rsi)
+	movl	$1, %eax
+	kmov	%eax, %k1
+	vpackstorelpd	%zmm0, 8(%rsi){%k1}
+	jmp	.Lst_struct_e
+.Lst_struct_p3:
 	testl	$0x400, %ecx
-	cmovnz	%r10, %rax
-	cmovnz	%r11, %rdx
+	jz	.Lst_struct_p4
+	/* %zmm0, %zmm1 */
+	movl	$1, %eax
+	kmov	%eax, %k1
+	vpackstorelpd	%zmm0, (%rsi){%k1}
+	vpackstorelpd	%zmm1, 8(%rsi){%k1}
+	jmp	.Lst_struct_e
+.Lst_struct_p4:
+	/* %rax, %rdx */
 	movq	%rax, (%rsi)
 	movq	%rdx, 8(%rsi)
-
+.Lst_struct_e:
 	/* Bits 12-31 contain the true size of the structure.  Copy from
 	   the scratch area to the true destination.  */
 	shrl	$12, %ecx
 	rep movsb
 	ret
 
-	/* Many times we can avoid loading any SSE registers at all.
+	/* Many times we can avoid loading any vector registers at all.
 	   It's not worth an indirect jump to load the exact set of
-	   SSE registers needed; zero or all is a good compromise.  */
+	   vector registers needed; zero or all is a good compromise.  */
 	.align 2
 .LUW3:
-.Lload_sse:
-	movdqa	48(%r10), %xmm0
-	movdqa	64(%r10), %xmm1
-	movdqa	80(%r10), %xmm2
-	movdqa	96(%r10), %xmm3
-	movdqa	112(%r10), %xmm4
-	movdqa	128(%r10), %xmm5
-	movdqa	144(%r10), %xmm6
-	movdqa	160(%r10), %xmm7
-	jmp	.Lret_from_load_sse
+.Lload_vec:
+	movl	$1, %eax
+	vloadunpacklpd	48(%r10), %zmm0{%k1}
+	vloadunpacklpd	64(%r10), %zmm1{%k1}
+	vloadunpacklpd	80(%r10), %zmm2{%k1}
+	vloadunpacklpd	96(%r10), %zmm3{%k1}
+	vloadunpacklpd	112(%r10), %zmm4{%k1}
+	vloadunpacklpd	128(%r10), %zmm5{%k1}
+	vloadunpacklpd	144(%r10), %zmm6{%k1}
+	vloadunpacklpd	160(%r10), %zmm7{%k1}
+	jmp	.Lret_from_load_vec
 
 .LUW4:
 	.size    ffi_call_unix64,.-ffi_call_unix64
@@ -207,7 +231,7 @@ ffi_call_unix64:
 	.globl ffi_closure_unix64
 	.type	ffi_closure_unix64,@function
 
-ffi_closure_unix64:
+ffi_closure_k1om:
 .LUW5:
 	/* The carry flag is set by the trampoline iff SSE registers
 	   are used.  Don't clobber it before the branch instruction.  */
@@ -219,8 +243,8 @@ ffi_closure_unix64:
 	movq    %rcx, 24(%rsp)
 	movq    %r8, 32(%rsp)
 	movq    %r9, 40(%rsp)
-	jc      .Lsave_sse
-.Lret_from_save_sse:
+	jc      .Lsave_vec
+.Lret_from_save_vec:
 
 	movq	%r10, %rdi
 	leaq	176(%rsp), %rsi
@@ -279,11 +303,15 @@ ffi_closure_unix64:
 
 	.align 2
 .Lld_float:
-	movss	-24(%rsp), %xmm0
+	movl	$1, %eax
+	kmov	%eax, %k1	
+	vpackstorelps	-24(%rsp), %zmm0{%k1}
 	ret
 	.align 2
 .Lld_double:
-	movsd	-24(%rsp), %xmm0
+	movl	$1, %eax
+	kmov	%eax, %k1	
+	vpackstorelpd	-24(%rsp), %zmm0{%k1}
 	ret
 	.align 2
 .Lld_ldouble:
@@ -292,35 +320,58 @@ ffi_closure_unix64:
 
 	.align 2
 .Lld_struct:
-	/* There are four possibilities here, %rax/%rdx, %xmm0/%rax,
-	   %rax/%xmm0, %xmm0/%xmm1.  We collapse two by always loading
-	   both rdx and xmm1 with the second word.  For the remaining,
+	/* There are four possibilities here, %rax/%rdx, %zmm0/%rax,
+	   %rax/%zmm0, %zmm0/%zmm1.  We collapse two by always loading
+	   both rdx and zmm1 with the second word.  For the remaining,
 	   bit 8 set means xmm0 gets the second word, and bit 9 means
 	   that rax gets the second word.  */
-	movq	-24(%rsp), %rcx
-	movq	-16(%rsp), %rdx
-	movq	-16(%rsp), %xmm1
 	testl	$0x100, %eax
-	cmovnz	%rdx, %rcx
-	movd	%rcx, %xmm0
+	jz	.Lld_struct_p2
+	/* %zmm0, %rax */
+	movl	$1, %eax
+	kmov	%eax, %k1
+	vloadunpacklpd -24(%rsp), %zmm0{%k1}
+	movq	-16(%rsp), %rax
+	ret
+.Lld_struct_p2:
 	testl	$0x200, %eax
+	jz	.Lld_struct_p3
+	/* %rax, %zmm0 */
+	movl	$1, %eax
+	kmov	%eax, %k1
+	vloadunpacklpd -16(%rsp), %zmm0{%k1}
 	movq	-24(%rsp), %rax
-	cmovnz	%rdx, %rax
+	ret
+.Lld_struct_p3:
+	testl	$0x300, %eax
+	jz	.Lld_struct_p4
+	/* %zmm0, %zmm1 */
+	movl	$1, %eax
+	kmov	%eax, %k1
+	vloadunpacklpd -24(%rsp), %zmm0{%k1}
+	vloadunpacklpd -16(%rsp), %zmm1{%k1}
+	ret
+.Lld_struct_p4:
+	/* %rax, %rdx */
+	movq	-24(%rsp), %rax
+	movq	-16(%rsp), %rdx
 	ret
 
-	/* See the comment above .Lload_sse; the same logic applies here.  */
+	/* See the comment above .Lload_vec; the same logic applies here.  */
 	.align 2
 .LUW8:
-.Lsave_sse:
-	movdqa	%xmm0, 48(%rsp)
-	movdqa	%xmm1, 64(%rsp)
-	movdqa	%xmm2, 80(%rsp)
-	movdqa	%xmm3, 96(%rsp)
-	movdqa	%xmm4, 112(%rsp)
-	movdqa	%xmm5, 128(%rsp)
-	movdqa	%xmm6, 144(%rsp)
-	movdqa	%xmm7, 160(%rsp)
-	jmp	.Lret_from_save_sse
+.Lsave_vec:
+	movl	$1, %eax
+	kmov	%eax, %k1	
+	vpackstorelpd	48(%rsp), %zmm0{%k1}
+	vpackstorelpd	64(%rsp), %zmm1{%k1}
+	vpackstorelpd	80(%rsp), %zmm2{%k1}
+	vpackstorelpd	96(%rsp), %zmm3{%k1}
+	vpackstorelpd	112(%rsp), %zmm4{%k1}
+	vpackstorelpd	128(%rsp), %zmm5{%k1}
+	vpackstorelpd	144(%rsp), %zmm6{%k1}
+	vpackstorelpd	160(%rsp), %zmm7{%k1}
+	jmp	.Lret_from_save_vec
 
 .LUW9:
 	.size	ffi_closure_unix64,.-ffi_closure_unix64

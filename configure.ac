@@ -167,6 +167,10 @@ case "$host" in
 	fi
 	;;
 
+  x86_64-k1om-*)
+  	TARGET=K1OM; TARGETDIR=x86
+	;;
+
   i?86-*-* | x86_64-*-*)
 	TARGETDIR=x86
 	if test $ac_cv_sizeof_size_t = 4; then
@@ -300,6 +304,7 @@ AM_CONDITIONAL(LIBFFI_CRIS, test x$TARGET = xLIBFFI_CRIS)
 AM_CONDITIONAL(FRV, test x$TARGET = xFRV)
 AM_CONDITIONAL(S390, test x$TARGET = xS390)
 AM_CONDITIONAL(X86_64, test x$TARGET = xX86_64)
+AM_CONDITIONAL(K1OM, test x$TARGET = xK1OM)
 AM_CONDITIONAL(SH, test x$TARGET = xSH)
 AM_CONDITIONAL(SH64, test x$TARGET = xSH64)
 AM_CONDITIONAL(PA_LINUX, test x$TARGET = xPA_LINUX)
@@ -362,7 +367,7 @@ if test x$TARGET = xSPARC; then
     fi
 fi
 
-if test x$TARGET = xX86 || test x$TARGET = xX86_WIN32 || test x$TARGET = xX86_64; then
+if test x$TARGET = xX86 || test x$TARGET = xX86_WIN32 || test x$TARGET = xX86_64 || test x$TARGET = xK1OM; then
     AC_CACHE_CHECK([assembler supports pc related relocs],
 	libffi_cv_as_x86_pcrel, [
 	libffi_cv_as_x86_pcrel=no
@@ -435,7 +440,7 @@ esac
 AM_CONDITIONAL(FFI_EXEC_TRAMPOLINE_TABLE, test x$FFI_EXEC_TRAMPOLINE_TABLE = x1)
 AC_SUBST(FFI_EXEC_TRAMPOLINE_TABLE)
 
-if test x$TARGET = xX86_64; then
+if test x$TARGET = xX86_64 || test x$TARGET = xK1OM; then
     AC_CACHE_CHECK([assembler supports unwind section type],
 	libffi_cv_as_x86_64_unwind_section_type, [
 	libffi_cv_as_x86_64_unwind_section_type=yes

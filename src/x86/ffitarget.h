@@ -98,9 +98,12 @@ typedef enum ffi_abi {
   /* ---- Intel x86 and AMD x86-64 - */
   FFI_SYSV,
   FFI_UNIX64,   /* Unix variants all use the same ABI for x86-64  */
+  FFI_K1OM,     /* K1OM  */
   FFI_LAST_ABI,
 #if defined(__i386__) || defined(__i386)
   FFI_DEFAULT_ABI = FFI_SYSV
+#elif defined(__mic__)
+  FFI_DEFAULT_ABI = FFI_K1OM
 #else
   FFI_DEFAULT_ABI = FFI_UNIX64
 #endif
@@ -116,7 +119,10 @@ typedef enum ffi_abi {
 #define FFI_TYPE_SMALL_STRUCT_4B (FFI_TYPE_LAST + 3)
 #define FFI_TYPE_MS_STRUCT       (FFI_TYPE_LAST + 4)
 
-#if defined (X86_64) || (defined (__x86_64__) && defined (X86_DARWIN))
+#if (defined (K1OM) || defined (__mic__)) && defined (X86_DARWIN)
+#define FFI_TRAMPOLINE_SIZE 24
+#define FFI_NATIVE_RAW_API 0
+#elif defined (X86_64) || (defined (__x86_64__) && defined (X86_DARWIN))
 #define FFI_TRAMPOLINE_SIZE 24
 #define FFI_NATIVE_RAW_API 0
 #else
